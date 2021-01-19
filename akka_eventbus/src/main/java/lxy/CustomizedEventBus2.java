@@ -2,6 +2,9 @@ package lxy;
 import akka.actor.Actor;
 import akka.actor.ActorRef;
 import akka.event.japi.EventBus;
+import com.fasterxml.jackson.annotation.JsonInclude;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.SerializationFeature;
 import lombok.extern.slf4j.Slf4j;
 
 import java.util.*;
@@ -18,14 +21,14 @@ import java.util.concurrent.CopyOnWriteArraySet;
  * 两个map，KeyValueMap一个存储了field=value的actorRef，key为message_type + field + field_value
  * 另一个KeyMap存储了某个filed下的所有actorRef,key为message_type + field
  * 查询的时候,当给定一个消息为(message_type="A", field1="b", field2="c")时，
- * 所有符合条件的actorRef为 KeyValueMap[A+field1+b] + KeyValueMap[A+field2+c] - (KeyMap[A+field1] - KeyValueMap[A+field1+b]) - (KeyMap[A+field2] - KeyValueMap[A+field2+c])
+ * 所有符合条件的actorRef为 KeyValueMap[A] + KeyValueMap[A+field1+b] + KeyValueMap[A+field2+c] - (KeyMap[A+field1] - KeyValueMap[A+field1+b]) - (KeyMap[A+field2] - KeyValueMap[A+field2+c])
  *
  * 优点：查询的key的个数与维度的个数为线性关系
  * 缺点：逻辑稍微复杂一些，取消订阅的时候，需要遍历所有的key
  *
  */
 @Slf4j
-public class CustomizedEventBus2 implements EventBus<MessageBase, ActorRef, Map<String, String>> {
+public class CustomizedEventBus2 implements EventBus<TopicMessageBase, ActorRef, TopicMessageBase> {
     /**
      *    用于存储subscriber和Classifier的映射关系
      *    key class+field+value
@@ -38,23 +41,34 @@ public class CustomizedEventBus2 implements EventBus<MessageBase, ActorRef, Map<
      */
     Map<String, Set<ActorRef>> subscriberKeyMap = new ConcurrentHashMap<>();
 
+    final ObjectMapper oMapper;
+
+    public CustomizedEventBus2() {
+        oMapper = new ObjectMapper();
+        oMapper.configure(SerializationFeature.FAIL_ON_EMPTY_BEANS, false);
+        oMapper.setSerializationInclusion(JsonInclude.Include.NON_NULL);
+    }
+
     @Override
-    public boolean subscribe(ActorRef subscriber, Map<String, String> to) {
+    public boolean subscribe(ActorRef subscriber, TopicMessageBase to) {
+
         Map<String, String> subscriberKeys = classifier2Keys(to);
         log.info("lixiangyang debug. subscribe {} to {}", subscriber.path().name(), subscriberKeys);
         for (var entry : subscriberKeys.entrySet()) {
             var subscriberKeyValue = subscriberKeyValueMap.computeIfAbsent(entry.getValue(), key -> new CopyOnWriteArraySet<>());
             subscriberKeyValue.add(subscriber);
-
-            var subscriberKey = subscriberKeyMap.computeIfAbsent(entry.getKey(), key -> new CopyOnWriteArraySet<>());
-            subscriberKey.add(subscriber);
+            // 如果是定义的类型，则不用做排除
+            if (!entry.getKey().isEmpty()) {
+                var subscriberKey = subscriberKeyMap.computeIfAbsent(entry.getKey(), key -> new CopyOnWriteArraySet<>());
+                subscriberKey.add(subscriber);
+            }
         }
         return true;
     }
 
     @Override
-    public void publish(MessageBase msg) {
-        Map<String, String> keys = composeKeys(msg);
+    public void publish(TopicMessageBase msg) {
+        Map<String, String> keys = classifier2Keys(msg.getTopic());
         log.info("lixiangyang debug. keys: {}", keys);
         Set<ActorRef> candidates = new HashSet<>();
         Set<ActorRef> excludes = new HashSet<>();
@@ -98,8 +112,9 @@ public class CustomizedEventBus2 implements EventBus<MessageBase, ActorRef, Map<
         log.info("======end=====");
 
     }
+
     @Override
-    public boolean unsubscribe(ActorRef subscriber, Map<String ,String> to) {
+    public boolean unsubscribe(ActorRef subscriber, TopicMessageBase to) {
         unsubscribe(subscriber);
         return true;
     }
@@ -115,24 +130,37 @@ public class CustomizedEventBus2 implements EventBus<MessageBase, ActorRef, Map<
     }
 
 
-    Map<String, String> composeKeys(MessageBase msg) {
-        var classifier = msg.getClassifier();
+    Map<String, String> composeKeys(TopicMessageBase msg) {
+        var classifier = msg.getTopic();
         log.info("message classifier: {}", classifier);
         return classifier2Keys(classifier);
     }
 
-    Map<String, String> classifier2Keys(Map<String, String> classifier) {
+    Map<String, String> classifier2Keys(TopicMessageBase topic) {
+        var classifier = topic2Map(topic);
         Map<String ,String> keyValues = new HashMap<>();
         String messageType = classifier.get("message_type");
+        String resKey;
+        String resValue;
         for (String key : classifier.keySet()) {
+            // type 类型，单独存储即可
             if (key.compareTo("message_type") ==0) {
-                continue;
+                resKey = "";
+                resValue = messageType;
+            } else {
+                resKey = String.format("%s#%s", messageType, key);
+                resValue = String.format("%s#%s", resKey, classifier.get(key));
             }
-            String resKey = String.format("%s#%s", messageType, key);
-            String resValue = String.format("%s#%s", resKey, classifier.get(key));
             keyValues.put(resKey, resValue);
         }
         return keyValues;
     }
 
+    Map<String, String> topic2Map(TopicMessageBase topic) {
+        Map<String, String> map = oMapper.convertValue(topic, Map.class);
+        String fullClassName = topic.getClass().getCanonicalName();
+        map.put("message_type", fullClassName);
+        log.info("topic2Map, topic: {}, map: {}", topic, map);
+        return map;
+    }
 }

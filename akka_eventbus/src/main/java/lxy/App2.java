@@ -3,6 +3,8 @@ package lxy;
 import akka.actor.ActorRef;
 import akka.actor.ActorSystem;
 import akka.actor.Props;
+import com.fasterxml.jackson.annotation.JsonInclude;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.NonNull;
 import lombok.extern.slf4j.Slf4j;
 
@@ -26,10 +28,15 @@ public class App2 {
         List<String> tenors = List.of("t1", "t2", "t3");
         List<String> exDestination = List.of("ex1", "ex2", "ex3");
 
-        eventBus.subscribe(worker1, Map.of("message_type", "MarketData", "symbol", symbols.get(0)));
-        eventBus.subscribe(worker1, Map.of("message_type", "AggMarketData", "symbol", symbols.get(0)));
-        eventBus.subscribe(worker2, Map.of("message_type", "MarketData", "symbol", symbols.get(0), "tenor", tenors.get(0)));
-        eventBus.subscribe(worker3, Map.of("message_type", "MarketData", "symbol", symbols.get(0), "tenor", tenors.get(0), "exDestination", exDestination.get(0)));
+        eventBus.subscribe(worker3, MarketData.Topic.builder().symbol(symbols.get(0)).tenor(tenors.get(0)).exDestination(exDestination.get(0)).build());
+        eventBus.subscribe(worker3, MarketData.Topic.builder().symbol(symbols.get(2)).tenor(tenors.get(0)).exDestination(exDestination.get(0)).build());
+
+        eventBus.subscribe(worker1, MarketData.Topic.builder().symbol(symbols.get(0)).build());
+
+        eventBus.subscribe(worker4, MarketData.Topic.builder().build());
+
+        eventBus.subscribe(worker1, AggMarketData.Topic.builder().symbol(symbols.get(0)).build());
+        eventBus.subscribe(worker2, MarketData.Topic.builder().symbol(symbols.get(0)).tenor(tenors.get(0)).build());
         eventBus.publish(MarketData.builder()
                 .symbol(symbols.get(0))
                 .exDestination(exDestination.get(0))
@@ -57,7 +64,7 @@ public class App2 {
         var random = new Random();
 
         while (true) {
-            MessageBase msg;
+            TopicMessageBase msg;
             if (random.nextBoolean()) {
                 msg = MarketData.builder()
                         .symbol(symbols.get(random.nextInt(symbols.size())))

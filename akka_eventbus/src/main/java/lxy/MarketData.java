@@ -1,10 +1,9 @@
 package lxy;
 
+import com.fasterxml.jackson.annotation.JsonIgnore;
 import lombok.Builder;
+import lombok.Getter;
 import lombok.ToString;
-
-import java.util.HashMap;
-import java.util.Map;
 
 
 /**
@@ -12,7 +11,7 @@ import java.util.Map;
  */
 @Builder
 @ToString
-public class MarketData extends MessageBase{
+public class MarketData implements TopicMessageBase {
 
     String exDestination;
 
@@ -20,23 +19,25 @@ public class MarketData extends MessageBase{
 
     String tenor;
 
+    @JsonIgnore
     @Override
-    public Map<String, String> getClassifier() {
-        Map<String ,String> classifier = new HashMap<>(4);
-        classifier.put("message_type", this.getClass().getSimpleName());
-        classifier.put("exDestination", exDestination);
-        classifier.put("symbol", symbol);
-        classifier.put("tenor", tenor);
-        return classifier;
+    public Topic getTopic() {
+        return Topic.builder().symbol(symbol).tenor(tenor).exDestination(exDestination).build();
     }
 
-    static public Map<String, String> composeClassifier(String exDestination, String symbol, String tenor) {
-        Map<String ,String> classifier = new HashMap<>(4);
-        classifier.put("message_type", MarketData.class.getSimpleName());
-        classifier.put("exDestination", exDestination == null ? "*" : exDestination);
-        classifier.put("symbol", symbol == null ? "*" : symbol);
-        classifier.put("tenor", tenor == null ? "*" : tenor);
-        return classifier;
+    @Builder
+    @ToString
+    @Getter
+    static class Topic implements TopicMessageBase {
+        String exDestination;
+
+        String symbol;
+
+        String tenor;
+
     }
+
+
+
 
 }
